@@ -1,21 +1,22 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-// Función para generar token JWT
+// Función para generar token JWT - CORREGIDA
 const generateToken = (user) => {
   return jwt.sign(
     { 
-      id: user._id, 
+      id: user._id.toString(), // Convertir explícitamente a string
       username: user.username, 
       email: user.email,
-      role: user.role 
+      role: user.role,
+      iat: Math.floor(Date.now() / 1000) // Agregar timestamp explícito
     },
     process.env.JWT_SECRET,
     { expiresIn: '24h' }
   );
 };
 
-// Registro de usuarios
+// Resto del código igual...
 const register = async (req, res) => {
   try {
     const { username, email, password, role } = req.body;
@@ -193,12 +194,13 @@ const login = async (req, res) => {
   }
 };
 
-// Obtener perfil del usuario autenticado
+// Obtener perfil del usuario autenticado - CORREGIDO
 const getProfile = async (req, res) => {
   try {
+    console.log('Token payload:', req.user); // Debug log
+    
     // El usuario ya viene del middleware de autenticación
-    const user = await User.findById(req.user._id)
-      .populate('createdAt')
+    const user = await User.findById(req.user.id) // Usar req.user.id en lugar de req.user._id
       .select('-password');
 
     if (!user) {
@@ -231,11 +233,11 @@ const getProfile = async (req, res) => {
   }
 };
 
-// Actualizar perfil del usuario
+// Actualizar perfil del usuario - CORREGIDO
 const updateProfile = async (req, res) => {
   try {
     const { username, email, currentPassword, newPassword } = req.body;
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user.id); // Usar req.user.id
 
     if (!user) {
       return res.status(404).json({
@@ -331,11 +333,11 @@ const updateProfile = async (req, res) => {
   }
 };
 
-// Refresh token
+// Refresh token - CORREGIDO
 const refreshToken = async (req, res) => {
   try {
     // El usuario ya viene del middleware de autenticación
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user.id); // Usar req.user.id
 
     if (!user || !user.isActive) {
       return res.status(401).json({
