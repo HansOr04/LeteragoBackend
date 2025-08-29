@@ -5,23 +5,24 @@ const techniqueSchema = new mongoose.Schema({
     type: String,
     required: [true, 'El nombre de la técnica es requerido'],
     trim: true,
-    maxlength: [200, 'El nombre no puede exceder 200 caracteres']
+    maxlength: [500, 'El nombre no puede exceder 500 caracteres'] // Más flexible
   },
   mitreid: {
     type: String,
     unique: true,
     sparse: true, // Permite valores null únicos
-    match: [/^T\d{4}(\.\d{3})?$/, 'El ID debe seguir el formato MITRE (ej: T1001 o T1001.001)']
+    trim: true
+    // Sin validación de formato - puede ser cualquier string
   },
   description: {
     type: String,
     required: [true, 'La descripción es requerida'],
-    maxlength: [2000, 'La descripción no puede exceder 2000 caracteres']
+    maxlength: [5000, 'La descripción no puede exceder 5000 caracteres'] // Más flexible
   },
   category: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Category',
-    required: [true, 'La categoría es requerida']
+    ref: 'Category'
+    // No requerido para mayor flexibilidad
   },
   fileLocation: {
     type: String,
@@ -40,11 +41,11 @@ const techniqueSchema = new mongoose.Schema({
   }],
   platforms: [{
     type: String,
-    enum: ['Windows', 'Linux', 'macOS', 'Android', 'iOS', 'Cloud', 'Network', 'Container'],
+    // Sin enum - puede ser cualquier plataforma
     trim: true
   }],
   datasources: [{
-    name: { type: String, required: true },
+    name: { type: String },
     description: { type: String, default: '' }
   }],
   mitigation: {
@@ -60,34 +61,21 @@ const techniqueSchema = new mongoose.Schema({
     }]
   },
   references: [{
-    name: { 
-      type: String, 
-      required: [true, 'El nombre de la referencia es requerido'] 
-    },
-    url: { 
-      type: String, 
-      required: [true, 'La URL de la referencia es requerida'],
-      match: [/^https?:\/\/.+/, 'Debe ser una URL válida']
-    },
+    name: { type: String },
+    url: { type: String },
     description: { type: String, default: '' }
   }],
   tactics: [{
-    type: String,
-    enum: [
-      'Reconnaissance', 'Resource Development', 'Initial Access', 
-      'Execution', 'Persistence', 'Privilege Escalation',
-      'Defense Evasion', 'Credential Access', 'Discovery',
-      'Lateral Movement', 'Collection', 'Command and Control',
-      'Exfiltration', 'Impact'
-    ]
+    type: String
+    // Sin enum - puede ser cualquier táctica
   }],
   killChainPhases: [{
-    killChainName: { type: String, default: 'mitre-attack' },
-    phaseName: { type: String, required: true }
+    killChainName: { type: String, default: 'custom' },
+    phaseName: { type: String }
   }],
   revisionHistory: [{
-    version: { type: String, required: true },
-    changes: { type: String, required: true },
+    version: { type: String },
+    changes: { type: String },
     changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     changedAt: { type: Date, default: Date.now }
   }],
@@ -101,12 +89,27 @@ const techniqueSchema = new mongoose.Schema({
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+    ref: 'User'
+    // No requerido para mayor flexibilidad
   },
   lastModifiedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  // Nuevos campos opcionales para ISO27001
+  iso27001Reference: {
+    type: String,
+    trim: true
+  },
+  riskLevel: {
+    type: String,
+    enum: ['Low', 'Medium', 'High', 'Critical'],
+    default: 'Medium'
+  },
+  status: {
+    type: String,
+    enum: ['Draft', 'Review', 'Approved', 'Deprecated'],
+    default: 'Draft'
   }
 }, {
   timestamps: true,
@@ -114,7 +117,7 @@ const techniqueSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Índices para optimización
+// Índices para optimización (mantenidos)
 techniqueSchema.index({ name: 1 });
 techniqueSchema.index({ mitreid: 1 });
 techniqueSchema.index({ category: 1 });
@@ -122,37 +125,32 @@ techniqueSchema.index({ platforms: 1 });
 techniqueSchema.index({ tactics: 1 });
 techniqueSchema.index({ tags: 1 });
 techniqueSchema.index({ isActive: 1 });
+techniqueSchema.index({ status: 1 });
+techniqueSchema.index({ riskLevel: 1 });
 techniqueSchema.index({ createdAt: -1 });
 
-// Índice de texto para búsqueda
+// Índice de texto para búsqueda (expandido)
 techniqueSchema.index({
   name: 'text',
   description: 'text',
   'mitigation.description': 'text',
-  'detection.description': 'text'
+  'detection.description': 'text',
+  mitreid: 'text',
+  iso27001Reference: 'text'
 });
 
-// Middleware pre-save para generar MITRE ID automático si no se proporciona
+// Middleware pre-save simplificado
 techniqueSchema.pre('save', async function(next) {
   try {
-    // Si no hay MITRE ID, generar uno
-    if (!this.mitreid && this.isNew) {
-      const lastTechnique = await this.constructor
-        .findOne({ mitreid: { $regex: /^T\d{4}$/ } })
-        .sort({ mitreid: -1 });
-      
-      let nextNumber = 1001;
-      if (lastTechnique && lastTechnique.mitreid) {
-        const currentNumber = parseInt(lastTechnique.mitreid.substring(1));
-        nextNumber = currentNumber + 1;
-      }
-      
-      this.mitreid = `T${nextNumber}`;
+    // Generar ID automático solo si se solicita
+    if (!this.mitreid && this.isNew && this.generateId) {
+      const count = await this.constructor.countDocuments();
+      this.mitreid = `TECH-${(count + 1).toString().padStart(4, '0')}`;
     }
     
     // Actualizar lastModifiedBy si no es una creación nueva
-    if (!this.isNew) {
-      this.lastModifiedBy = this.modifiedBy || this.createdBy;
+    if (!this.isNew && this.modifiedBy) {
+      this.lastModifiedBy = this.modifiedBy;
     }
     
     next();
@@ -179,25 +177,27 @@ techniqueSchema.virtual('fileUrl').get(function() {
   return null;
 });
 
-// Método para añadir una nueva revisión al historial
+// Método para añadir una nueva revisión al historial (simplificado)
 techniqueSchema.methods.addRevision = function(changes, userId) {
-  const currentVersion = this.version || '1.0';
-  const versionParts = currentVersion.split('.').map(Number);
+  if (!this.version) this.version = '1.0';
+  
+  const versionParts = this.version.split('.').map(Number);
+  if (versionParts.length < 2) versionParts.push(0);
   versionParts[1]++; // Incrementar versión menor
   const newVersion = versionParts.join('.');
   
   this.revisionHistory.push({
     version: newVersion,
-    changes: changes,
+    changes: changes || 'Cambios no especificados',
     changedBy: userId,
     changedAt: new Date()
   });
   
   this.version = newVersion;
-  this.lastModifiedBy = userId;
+  if (userId) this.lastModifiedBy = userId;
 };
 
-// Método estático para búsqueda avanzada
+// Método estático para búsqueda avanzada (mejorado y más flexible)
 techniqueSchema.statics.advancedSearch = function(searchParams) {
   const {
     query,
@@ -205,6 +205,8 @@ techniqueSchema.statics.advancedSearch = function(searchParams) {
     platforms,
     tactics,
     tags,
+    status,
+    riskLevel,
     page = 1,
     limit = 20,
     sortBy = 'createdAt',
@@ -215,28 +217,21 @@ techniqueSchema.statics.advancedSearch = function(searchParams) {
   
   // Búsqueda de texto
   if (query) {
-    filters.$text = { $search: query };
+    filters.$or = [
+      { name: { $regex: query, $options: 'i' } },
+      { description: { $regex: query, $options: 'i' } },
+      { mitreid: { $regex: query, $options: 'i' } },
+      { iso27001Reference: { $regex: query, $options: 'i' } }
+    ];
   }
   
-  // Filtro por categoría
-  if (category) {
-    filters.category = category;
-  }
-  
-  // Filtro por plataformas
-  if (platforms && platforms.length > 0) {
-    filters.platforms = { $in: platforms };
-  }
-  
-  // Filtro por tácticas
-  if (tactics && tactics.length > 0) {
-    filters.tactics = { $in: tactics };
-  }
-  
-  // Filtro por tags
-  if (tags && tags.length > 0) {
-    filters.tags = { $in: tags };
-  }
+  // Filtros opcionales
+  if (category) filters.category = category;
+  if (platforms && platforms.length > 0) filters.platforms = { $in: platforms };
+  if (tactics && tactics.length > 0) filters.tactics = { $in: tactics };
+  if (tags && tags.length > 0) filters.tags = { $in: tags };
+  if (status) filters.status = status;
+  if (riskLevel) filters.riskLevel = riskLevel;
   
   const skip = (page - 1) * limit;
   const sort = {};
@@ -252,24 +247,42 @@ techniqueSchema.statics.advancedSearch = function(searchParams) {
     .exec();
 };
 
-// Método para duplicar una técnica
+// Método para duplicar una técnica (simplificado)
 techniqueSchema.methods.duplicate = async function(userId) {
   const duplicated = new this.constructor({
     name: `${this.name} (Copia)`,
     description: this.description,
     category: this.category,
-    tags: [...this.tags],
-    platforms: [...this.platforms],
-    datasources: [...this.datasources],
-    mitigation: this.mitigation,
-    detection: this.detection,
-    references: [...this.references],
-    tactics: [...this.tactics],
-    killChainPhases: [...this.killChainPhases],
+    tags: [...(this.tags || [])],
+    platforms: [...(this.platforms || [])],
+    datasources: [...(this.datasources || [])],
+    mitigation: this.mitigation || {},
+    detection: this.detection || {},
+    references: [...(this.references || [])],
+    tactics: [...(this.tactics || [])],
+    killChainPhases: [...(this.killChainPhases || [])],
+    iso27001Reference: this.iso27001Reference,
+    riskLevel: this.riskLevel,
+    status: 'Draft', // Las copias empiezan como borrador
     createdBy: userId
   });
   
   return await duplicated.save();
+};
+
+// Método estático para estadísticas
+techniqueSchema.statics.getStats = function() {
+  return this.aggregate([
+    { $match: { isActive: true } },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        byStatus: { $push: '$status' },
+        byRiskLevel: { $push: '$riskLevel' }
+      }
+    }
+  ]);
 };
 
 module.exports = mongoose.model('Technique', techniqueSchema);
