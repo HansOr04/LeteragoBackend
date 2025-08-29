@@ -26,15 +26,64 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// CORS configurado
+// CORS configurado con manejo robusto
+const allowedOrigins = [
+  'https://leteragocertificacion27001.netlify.app',
+  'https://leteragocertificacion27001.netlify.app/', // Con barra al final también
+  'http://localhost:3000',
+  'http://localhost:3001'
+];
+
+// Agregar variable de entorno si existe
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
+  // También con barra al final por si acaso
+  if (!process.env.FRONTEND_URL.endsWith('/')) {
+    allowedOrigins.push(process.env.FRONTEND_URL + '/');
+  }
+}
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || ['https://leteragocertificacion27001.netlify.app', 'http://localhost:3001'],
+  origin: function (origin, callback) {
+    // Permitir requests sin origin (herramientas de desarrollo, Postman, etc.)
+    if (!origin) {
+      console.log('Request without origin - allowing');
+      return callback(null, true);
+    }
+    
+    console.log(`CORS check for origin: "${origin}"`);
+    console.log('Allowed origins:', allowedOrigins);
+    
+    if (allowedOrigins.includes(origin)) {
+      console.log(`✅ Origin "${origin}" allowed`);
+      return callback(null, true);
+    } else {
+      console.log(`❌ Origin "${origin}" blocked by CORS`);
+      return callback(new Error(`Origin ${origin} not allowed by CORS policy`));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Accept',
+    'Origin',
+    'X-Requested-With',
+    'Accept-Language',
+    'Accept-Encoding'
+  ],
+  optionsSuccessStatus: 200, // Para navegadores legacy
+  maxAge: 86400 // Cache preflight por 24 horas
 }));
 
-// Logging de requests (solo en desarrollo)
+// Middleware adicional para debug de requests
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} from ${req.headers.origin || 'no-origin'}`);
+  next();
+});
+
+// Logging de requests
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 } else {
@@ -59,7 +108,8 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     version: '1.0.0',
     uptime: process.uptime(),
-    database: 'Connected'
+    database: 'Connected',
+    corsOrigins: allowedOrigins
   });
 });
 
@@ -122,7 +172,7 @@ app.get('/api', (req, res) => {
 // Ruta de bienvenida
 app.get('/', (req, res) => {
   res.json({
-    message: '🛡️ Bienvenido a MITRE ATT&CK Clone API',
+    message: 'Bienvenido a MITRE ATT&CK Clone API',
     version: '1.0.0',
     status: 'Operacional',
     links: {
@@ -241,36 +291,39 @@ app.use((error, req, res, next) => {
 // ====== INICIO DEL SERVIDOR ======
 const server = app.listen(PORT, () => {
   console.log(`
-🚀 ========================================
+========================================
    MITRE ATT&CK Clone API Iniciado
 ========================================
 
-📍 Puerto: ${PORT}
-🌍 Entorno: ${process.env.NODE_ENV || 'development'}
-🔗 URL Local: http://localhost:${PORT}
-📊 Health Check: http://localhost:${PORT}/health
-📚 API Info: http://localhost:${PORT}/api
+Puerto: ${PORT}
+Entorno: ${process.env.NODE_ENV || 'development'}
+URL Local: http://localhost:${PORT}
+Health Check: http://localhost:${PORT}/health
+API Info: http://localhost:${PORT}/api
 
-📡 Endpoints disponibles:
-   🔐 Autenticación:
+CORS Origins permitidos:
+${allowedOrigins.map(origin => `  - ${origin}`).join('\n')}
+
+Endpoints disponibles:
+   Autenticación:
       POST /api/auth/register
       POST /api/auth/login
       GET  /api/auth/me
    
-   📁 Categorías:
+   Categorías:
       GET  /api/categories
       GET  /api/categories/hierarchy
       POST /api/categories
    
-   🎯 Técnicas:
+   Técnicas:
       GET  /api/techniques
       GET  /api/techniques/search
       GET  /api/techniques/stats
       POST /api/techniques
 
-🔧 Para desarrollo: npm run dev
-🏭 Para producción: npm start
-📂 Uploads: http://localhost:${PORT}/uploads/
+Para desarrollo: npm run dev
+Para producción: npm start
+Uploads: http://localhost:${PORT}/uploads/
 
 ========================================
   `);
@@ -278,24 +331,24 @@ const server = app.listen(PORT, () => {
 
 // ====== MANEJO GRACEFUL DE CIERRE ======
 const gracefulShutdown = async (signal) => {
-  console.log(`\n📨 ${signal} recibido, iniciando cierre graceful...`);
+  console.log(`\n${signal} recibido, iniciando cierre graceful...`);
   
   server.close(async () => {
-    console.log('🔒 Servidor HTTP cerrado');
+    console.log('Servidor HTTP cerrado');
     
     try {
       await closeDB();
-      console.log('✅ Cierre graceful completado');
+      console.log('Cierre graceful completado');
       process.exit(0);
     } catch (error) {
-      console.error('❌ Error durante el cierre:', error);
+      console.error('Error durante el cierre:', error);
       process.exit(1);
     }
   });
   
   // Forzar cierre después de 10 segundos
   setTimeout(() => {
-    console.error('❌ Forzando cierre del servidor...');
+    console.error('Forzando cierre del servidor...');
     process.exit(1);
   }, 10000);
 };
@@ -306,12 +359,12 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Manejar errores no capturados
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   gracefulShutdown('UNHANDLED_REJECTION');
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
+  console.error('Uncaught Exception:', error);
   gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
